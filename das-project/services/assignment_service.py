@@ -39,9 +39,28 @@ def get_last_duty_person(duty_type: str, day_category: str) -> dict | None:
     - duty_type: '총당직' | '부당직'
     - day_category: '휴무일' | '평일'
     """
-    # TODO: Phase 2에서 구현
-    # 가장 최근 완료/확정된 발령에서 해당 유형의 당직자 조회
-    pass
+    # 가장 최근 완료/확정된 발령 조회
+    client = db.get_client()
+    query = (
+        client.table("duty_assignments")
+        .select("*, main_duty:main_duty_id(*), sub_duty:sub_duty_id(*)")
+        .eq("day_category", day_category)
+        .in_("status", ["확정", "완료"])
+        .order("duty_date", desc=True)
+        .limit(1)
+    )
+
+    result = query.execute()
+    if not result.data:
+        return None
+
+    assignment = result.data[0]
+
+    # 총당직/부당직 구분하여 반환
+    if duty_type == "총당직":
+        return assignment.get("main_duty")
+    else:
+        return assignment.get("sub_duty")
 
 
 def get_eligible_employees(duty_type: str, day_category: str) -> list:
@@ -50,8 +69,29 @@ def get_eligible_employees(duty_type: str, day_category: str) -> list:
     - DUTY_RULES에서 해당 유형의 대상 직급/직위 확인
     - employees 테이블에서 해당 조건의 활동 직원 조회
     """
-    # TODO: Phase 2에서 구현
-    pass
+    # DUTY_RULES 키 생성 (holiday_main, weekday_sub 등)
+    rule_key = f"{day_category.replace('휴무일', 'holiday').replace('평일', 'weekday')}_{'main' if duty_type == '총당직' else 'sub'}"
+
+    if rule_key not in DUTY_RULES:
+        return []
+
+    rule = DUTY_RULES[rule_key]
+    target_grades = rule["grades"]
+    target_positions = rule["positions"]
+
+    # 활동 중인 직원 중 조건에 맞는 직원 조회
+    client = db.get_client()
+    query = (
+        client.table("employees")
+        .select("*")
+        .eq("is_active", True)
+        .in_("grade", target_grades)
+        .in_("position", target_positions)
+        .order("employee_no")
+    )
+
+    result = query.execute()
+    return result.data if result.data else []
 
 
 def auto_assign_next(duty_type: str, day_category: str) -> dict | None:
@@ -61,5 +101,25 @@ def auto_assign_next(duty_type: str, day_category: str) -> dict | None:
     2. get_eligible_employees로 대상자 목록 조회
     3. 최근 당직자 다음 순번 반환 (순환)
     """
-    # TODO: Phase 2에서 구현
-    pass
+    # 대상 직원 목록 조회
+    eligible = get_eligible_employees(duty_type, day_category)
+    if not eligible:
+        return None
+
+    # 최근 당직자 조회
+    last_person = get_last_duty_person(duty_type, day_category)
+
+    # 최근 당직자가 없으면 첫 번째 직원 반환
+    if not last_person:
+        return eligible[0]
+
+    # 최근 당직자의 다음 순번 찾기
+    last_emp_no = last_person.get("employee_no")
+    for i, emp in enumerate(eligible):
+        if emp["employee_no"] == last_emp_no:
+            # 다음 순번 반환 (순환)
+            next_index = (i + 1) % len(eligible)
+            return eligible[next_index]
+
+    # 최근 당직자가 대상자 목록에 없으면 첫 번째 직원 반환
+    return eligible[0]
