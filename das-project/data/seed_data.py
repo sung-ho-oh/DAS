@@ -210,6 +210,116 @@ def generate_all() -> dict:
     }
 
 
+def insert_to_supabase(data: dict) -> dict:
+    """
+    생성된 데이터를 Supabase에 삽입
+    반환: employee_no -> UUID 매핑
+    """
+    try:
+        from services import db
+    except Exception as e:
+        print(f"❌ Supabase 연결 실패: {e}")
+        print("   .env 파일에 SUPABASE_URL과 SUPABASE_KEY를 설정했는지 확인하세요.")
+        return {}
+
+    print("\n📤 Supabase에 데이터 삽입 중...")
+
+    # 1. 직원 삽입 (employee_no -> UUID 매핑 생성)
+    print("  → 직원 마스터 삽입 중...")
+    emp_map = {}  # employee_no -> UUID
+    try:
+        inserted_emps = db.insert_many("employees", data["employees"])
+        for emp in inserted_emps:
+            emp_map[emp["employee_no"]] = emp["id"]
+        print(f"    ✅ {len(inserted_emps)}명 삽입 완료")
+    except Exception as e:
+        print(f"    ❌ 직원 삽입 실패: {e}")
+        return emp_map
+
+    # 2. 당직 발령 삽입 (employee_no -> UUID 변환)
+    print("  → 당직 발령 삽입 중...")
+    assignments_with_ids = []
+    for asmt in data["assignments"]:
+        asmt_copy = asmt.copy()
+        # employee_no를 UUID로 변환
+        main_no = asmt_copy.pop("main_duty_employee_no")
+        sub_no = asmt_copy.pop("sub_duty_employee_no")
+        asmt_copy["main_duty_id"] = emp_map.get(main_no)
+        asmt_copy["sub_duty_id"] = emp_map.get(sub_no)
+        assignments_with_ids.append(asmt_copy)
+
+    try:
+        inserted_asmts = db.insert_many("duty_assignments", assignments_with_ids)
+        print(f"    ✅ {len(inserted_asmts)}건 삽입 완료")
+        # duty_date + duty_type -> assignment UUID 매핑 생성
+        asmt_map = {(a["duty_date"], a["duty_type"]): a["id"] for a in inserted_asmts}
+    except Exception as e:
+        print(f"    ❌ 당직 발령 삽입 실패: {e}")
+        asmt_map = {}
+
+    # 3. 당직 변경 삽입 (employee_no -> UUID, duty_date -> assignment_id 변환)
+    print("  → 당직 변경 삽입 중...")
+    changes_with_ids = []
+    for change in data["changes"]:
+        change_copy = change.copy()
+        # duty_date -> assignment_id 변환 (첫 번째 매칭되는 것 사용)
+        duty_date = change_copy.pop("assignment_duty_date")
+        assignment_id = None
+        for (date_key, type_key), aid in asmt_map.items():
+            if date_key == duty_date:
+                assignment_id = aid
+                break
+
+        if not assignment_id:
+            continue  # 해당 발령이 없으면 스킵
+
+        # employee_no -> UUID 변환
+        orig_no = change_copy.pop("original_employee_no")
+        new_no = change_copy.pop("new_employee_no")
+        change_copy["assignment_id"] = assignment_id
+        change_copy["original_employee_id"] = emp_map.get(orig_no)
+        change_copy["new_employee_id"] = emp_map.get(new_no)
+
+        if change_copy["original_employee_id"] and change_copy["new_employee_id"]:
+            changes_with_ids.append(change_copy)
+
+    try:
+        if changes_with_ids:
+            inserted_changes = db.insert_many("duty_changes", changes_with_ids)
+            print(f"    ✅ {len(inserted_changes)}건 삽입 완료")
+        else:
+            print(f"    ⚠️  삽입할 변경 데이터 없음")
+    except Exception as e:
+        print(f"    ❌ 당직 변경 삽입 실패: {e}")
+
+    # 4. 비상연락망 삽입 (employee_no -> UUID 변환)
+    print("  → 비상연락망 삽입 중...")
+    contacts_with_ids = []
+    for contact in data["contacts"]:
+        contact_copy = contact.copy()
+        emp_no = contact_copy.pop("employee_no")
+        contact_copy["employee_id"] = emp_map.get(emp_no)
+        if contact_copy["employee_id"]:
+            contacts_with_ids.append(contact_copy)
+
+    try:
+        inserted_contacts = db.insert_many("emergency_contacts", contacts_with_ids)
+        print(f"    ✅ {len(inserted_contacts)}건 삽입 완료")
+    except Exception as e:
+        print(f"    ❌ 비상연락망 삽입 실패: {e}")
+
+    # 5. 당직근무일지 삽입 (main_duty_id, sub_duty_id는 None으로)
+    print("  → 당직근무일지 삽입 중...")
+    try:
+        inserted_logs = db.insert_many("duty_logs", data["logs"])
+        print(f"    ✅ {len(inserted_logs)}건 삽입 완료")
+    except Exception as e:
+        print(f"    ❌ 당직근무일지 삽입 실패: {e}")
+
+    print("\n✅ Supabase 삽입 완료!")
+    return emp_map
+
+
 if __name__ == "__main__":
     data = generate_all()
 
@@ -220,8 +330,9 @@ if __name__ == "__main__":
             if items:
                 print(f"    예시: {json.dumps(items[0], ensure_ascii=False, indent=2)[:200]}...")
     else:
-        print("\n⚠️  Supabase 삽입은 Phase 1 개발 시 구현됩니다.")
-        print("    현재는 --dry-run으로 데이터 생성만 확인해주세요.")
-        print(f"\n📊 총 생성 데이터:")
-        for key, items in data.items():
-            print(f"  {key}: {len(items)}건")
+        # Supabase에 삽입
+        emp_map = insert_to_supabase(data)
+        if emp_map:
+            print(f"\n📊 삽입 완료 통계:")
+            for key, items in data.items():
+                print(f"  {key}: {len(items)}건")

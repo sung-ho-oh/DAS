@@ -39,9 +39,30 @@ def get_last_duty_person(duty_type: str, day_category: str) -> dict | None:
     - duty_type: '총당직' | '부당직'
     - day_category: '휴무일' | '평일'
     """
-    # TODO: Phase 2에서 구현
-    # 가장 최근 완료/확정된 발령에서 해당 유형의 당직자 조회
-    pass
+    # 가장 최근 완료/확정된 발령 조회
+    client = db.get_client()
+    query = (
+        client.table("duty_assignments")
+        .select("*, main_duty:employees!duty_assignments_main_duty_id_fkey(*), sub_duty:employees!duty_assignments_sub_duty_id_fkey(*)")
+        .eq("day_category", day_category)
+        .in_("status", ["완료", "확정"])
+        .order("duty_date", desc=True)
+        .limit(1)
+    )
+
+    response = query.execute()
+    if not response.data:
+        return None
+
+    assignment = response.data[0]
+
+    # duty_type에 따라 총당직/부당직 반환
+    if duty_type == "총당직":
+        return assignment.get("main_duty")
+    elif duty_type == "부당직":
+        return assignment.get("sub_duty")
+
+    return None
 
 
 def get_eligible_employees(duty_type: str, day_category: str) -> list:
@@ -50,8 +71,37 @@ def get_eligible_employees(duty_type: str, day_category: str) -> list:
     - DUTY_RULES에서 해당 유형의 대상 직급/직위 확인
     - employees 테이블에서 해당 조건의 활동 직원 조회
     """
-    # TODO: Phase 2에서 구현
-    pass
+    # DUTY_RULES에서 규칙 찾기
+    rule_key = f"{day_category.replace('무일', '')}_{'main' if duty_type == '총당직' else 'sub'}"
+    # 예: "휴무일" + "총당직" -> "휴_main" (X) -> "holiday_main"
+    # 변환 로직
+    if day_category == "휴무일":
+        prefix = "holiday"
+    elif day_category == "평일":
+        prefix = "weekday"
+    else:
+        return []
+
+    suffix = "main" if duty_type == "총당직" else "sub"
+    rule_key = f"{prefix}_{suffix}"
+
+    rule = DUTY_RULES.get(rule_key)
+    if not rule:
+        return []
+
+    # 해당 직급의 활동 직원 조회
+    target_grades = rule["grades"]
+    client = db.get_client()
+    query = (
+        client.table("employees")
+        .select("*")
+        .eq("is_active", True)
+        .in_("grade", target_grades)
+        .order("employee_no")
+    )
+
+    response = query.execute()
+    return response.data
 
 
 def auto_assign_next(duty_type: str, day_category: str) -> dict | None:
@@ -61,5 +111,23 @@ def auto_assign_next(duty_type: str, day_category: str) -> dict | None:
     2. get_eligible_employees로 대상자 목록 조회
     3. 최근 당직자 다음 순번 반환 (순환)
     """
-    # TODO: Phase 2에서 구현
-    pass
+    last_person = get_last_duty_person(duty_type, day_category)
+    eligible_list = get_eligible_employees(duty_type, day_category)
+
+    if not eligible_list:
+        return None
+
+    # 최근 당직자가 없으면 첫 번째 직원 반환
+    if not last_person:
+        return eligible_list[0]
+
+    # 최근 당직자 다음 순번 찾기
+    last_emp_no = last_person.get("employee_no")
+    for i, emp in enumerate(eligible_list):
+        if emp["employee_no"] == last_emp_no:
+            # 다음 순번 (순환)
+            next_idx = (i + 1) % len(eligible_list)
+            return eligible_list[next_idx]
+
+    # 못 찾으면 첫 번째 반환
+    return eligible_list[0]
