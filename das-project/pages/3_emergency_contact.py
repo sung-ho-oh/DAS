@@ -35,15 +35,20 @@ st.markdown("---")
 # ── 연락망 조회 ──
 @st.cache_data(ttl=30)
 def load_contacts():
-    """비상연락망 조회"""
+    """비상연락망 조회 (최적화: 한 번에 조회)"""
     # 모든 직원 조회
     employees = db.select_all("employees", order_by="name")
 
+    # 모든 연락망 한 번에 조회
+    all_contacts = db.select_all("emergency_contacts")
+
+    # employee_id로 매핑 (O(1) 조회를 위해)
+    contact_map = {c["employee_id"]: c for c in all_contacts}
+
     contacts_data = []
     for emp in employees:
-        # 연락망 조회
-        contact = db.select_where("emergency_contacts", "employee_id", emp["id"])
-        contact_info = contact[0] if contact else None
+        # 메모리에서 연락망 조회 (DB 호출 없음)
+        contact_info = contact_map.get(emp["id"])
 
         contacts_data.append({
             "employee_id": emp["id"],

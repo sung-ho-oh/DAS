@@ -9,13 +9,24 @@ from config import DUTY_RULES
 
 
 def get_assignments_by_month(year: int, month: int) -> list:
-    """월별 당직 발령 조회"""
+    """월별 당직 발령 조회 (최적화: JOIN으로 직원 정보 포함)"""
+    import calendar
+    last_day = calendar.monthrange(year, month)[1]
     start_date = f"{year}-{month:02d}-01"
-    if month == 12:
-        end_date = f"{year + 1}-01-01"
-    else:
-        end_date = f"{year}-{month + 1:02d}-01"
-    return db.select_between("duty_assignments", "duty_date", start_date, end_date, order_by="duty_date")
+    end_date = f"{year}-{month:02d}-{last_day:02d}"
+
+    # Supabase JOIN을 사용하여 직원 정보 한 번에 조회
+    client = db.get_client()
+    response = (
+        client.table("duty_assignments")
+        .select("*, main_duty:main_duty_id(*), sub_duty:sub_duty_id(*)")
+        .gte("duty_date", start_date)
+        .lte("duty_date", end_date)
+        .order("duty_date")
+        .execute()
+    )
+
+    return response.data if response.data else []
 
 
 def create_assignment(data: dict) -> dict:

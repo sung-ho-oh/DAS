@@ -44,11 +44,11 @@ with tab1:
     else:
         st.markdown("---")
 
-        # 변경 대상 발령 선택
+        # 변경 대상 발령 선택 (최적화: JOIN된 데이터 사용)
         assignment_options = {}
         for asmt in assignments:
-            main_duty = db.select_by_id("employees", asmt["main_duty_id"]) if asmt.get("main_duty_id") else None
-            sub_duty = db.select_by_id("employees", asmt["sub_duty_id"]) if asmt.get("sub_duty_id") else None
+            main_duty = asmt.get("main_duty")
+            sub_duty = asmt.get("sub_duty")
 
             main_name = f"{main_duty['name']}({main_duty['employee_no']})" if main_duty else "-"
             sub_name = f"{sub_duty['name']}({sub_duty['employee_no']})" if sub_duty else "-"

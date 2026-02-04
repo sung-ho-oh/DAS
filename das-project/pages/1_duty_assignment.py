@@ -53,17 +53,12 @@ if not assignments:
     st.info(f"{selected_year}년 {selected_month}월 당직 발령이 없습니다.")
     st.info("💡 아래 '자동 발령 생성' 버튼으로 한 달치 발령을 자동 생성할 수 있습니다.")
 else:
-    # 데이터프레임으로 변환
+    # 데이터프레임으로 변환 (최적화: 이미 JOIN된 데이터 사용)
     df_data = []
     for asmt in assignments:
-        # 직원 정보 조회
-        main_duty = None
-        sub_duty = None
-
-        if asmt.get("main_duty_id"):
-            main_duty = db.select_by_id("employees", asmt["main_duty_id"])
-        if asmt.get("sub_duty_id"):
-            sub_duty = db.select_by_id("employees", asmt["sub_duty_id"])
+        # JOIN으로 이미 가져온 직원 정보 사용 (DB 호출 없음)
+        main_duty = asmt.get("main_duty")
+        sub_duty = asmt.get("sub_duty")
 
         df_data.append({
             "일자": asmt["duty_date"],
