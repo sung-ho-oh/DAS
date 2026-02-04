@@ -130,6 +130,7 @@ def generate_changes(assignments: list, rate: float = 0.12) -> list:
     for asmt in sampled:
         changes.append({
             "assignment_duty_date": asmt["duty_date"],
+            "duty_type": asmt["duty_type"],  # assignment_id 매핑을 위해 추가
             "original_employee_no": asmt["main_duty_employee_no"],
             "new_employee_no": f"E{random.randint(1001, 1200)}",
             "duty_role": "총당직",
@@ -210,6 +211,108 @@ def generate_all() -> dict:
     }
 
 
+def insert_to_supabase(data: dict):
+    """Supabase에 테스트 데이터 삽입"""
+    from services import db
+
+    print("\n🚀 Supabase에 데이터 삽입 중...")
+
+    try:
+        # 1. 직원 마스터 삽입
+        print("  📥 직원 마스터 삽입 중...")
+        inserted_employees = db.insert_many("employees", data["employees"])
+        print(f"    ✅ {len(inserted_employees)}명 삽입 완료")
+
+        # employee_no -> UUID 매핑 생성
+        emp_no_to_id = {emp["employee_no"]: emp["id"] for emp in inserted_employees}
+
+        # 2. 당직 발령 삽입 (employee_no -> UUID 변환)
+        print("  📥 당직 발령 삽입 중...")
+        assignments_with_ids = []
+        for asmt in data["assignments"]:
+            assignments_with_ids.append({
+                "duty_date": asmt["duty_date"],
+                "day_of_week": asmt["day_of_week"],
+                "duty_type": asmt["duty_type"],
+                "day_category": asmt["day_category"],
+                "main_duty_id": emp_no_to_id.get(asmt["main_duty_employee_no"]),
+                "sub_duty_id": emp_no_to_id.get(asmt["sub_duty_employee_no"]),
+                "status": asmt["status"],
+            })
+        inserted_assignments = db.insert_many("duty_assignments", assignments_with_ids)
+        print(f"    ✅ {len(inserted_assignments)}건 삽입 완료")
+
+        # duty_date -> assignment_id 매핑 생성
+        duty_date_to_id = {f"{a['duty_date']}_{a['duty_type']}": a["id"] for a in inserted_assignments}
+
+        # 3. 당직 변경 삽입
+        print("  📥 당직 변경 삽입 중...")
+        changes_with_ids = []
+        for change in data["changes"]:
+            assignment_key = f"{change['assignment_duty_date']}_{change.get('duty_type', '야간')}"
+            assignment_id = duty_date_to_id.get(assignment_key)
+            if assignment_id and change["original_employee_no"] in emp_no_to_id and change["new_employee_no"] in emp_no_to_id:
+                changes_with_ids.append({
+                    "assignment_id": assignment_id,
+                    "original_employee_id": emp_no_to_id[change["original_employee_no"]],
+                    "new_employee_id": emp_no_to_id[change["new_employee_no"]],
+                    "duty_role": change["duty_role"],
+                    "change_reason": change["change_reason"],
+                    "change_date": change["change_date"],
+                })
+        if changes_with_ids:
+            inserted_changes = db.insert_many("duty_changes", changes_with_ids)
+            print(f"    ✅ {len(inserted_changes)}건 삽입 완료")
+        else:
+            print(f"    ⚠️  삽입할 변경 데이터 없음")
+
+        # 4. 비상연락망 삽입
+        print("  📥 비상연락망 삽입 중...")
+        contacts_with_ids = []
+        for contact in data["contacts"]:
+            if contact["employee_no"] in emp_no_to_id:
+                contacts_with_ids.append({
+                    "employee_id": emp_no_to_id[contact["employee_no"]],
+                    "phone_home": contact["phone_home"],
+                    "phone_mobile": contact["phone_mobile"],
+                    "note": contact.get("note", ""),
+                })
+        inserted_contacts = db.insert_many("emergency_contacts", contacts_with_ids)
+        print(f"    ✅ {len(inserted_contacts)}건 삽입 완료")
+
+        # 5. 당직근무일지 삽입 (당직자 정보는 임시로 첫 번째 직원 사용)
+        print("  📥 당직근무일지 삽입 중...")
+        logs_with_ids = []
+        first_emp_id = inserted_employees[0]["id"] if inserted_employees else None
+        for log in data["logs"]:
+            logs_with_ids.append({
+                "log_date": log["log_date"],
+                "factory": log["factory"],
+                "duty_type": log["duty_type"],
+                "main_duty_id": first_emp_id,  # 임시
+                "sub_duty_id": first_emp_id,   # 임시
+                "workforce_status": log["workforce_status"],
+                "construction_status": log["construction_status"],
+                "issues": log.get("issues", ""),
+                "special_notes": log.get("special_notes", ""),
+                "approval_status": log["approval_status"],
+            })
+        inserted_logs = db.insert_many("duty_logs", logs_with_ids)
+        print(f"    ✅ {len(inserted_logs)}건 삽입 완료")
+
+        print("\n✨ 모든 데이터 삽입 완료!")
+        print(f"  - 직원: {len(inserted_employees)}명")
+        print(f"  - 발령: {len(inserted_assignments)}건")
+        print(f"  - 변경: {len(changes_with_ids)}건")
+        print(f"  - 연락망: {len(inserted_contacts)}건")
+        print(f"  - 일지: {len(inserted_logs)}건")
+
+    except Exception as e:
+        print(f"\n❌ 오류 발생: {e}")
+        print("  Supabase 연결 정보를 확인하세요 (.env 파일)")
+        raise
+
+
 if __name__ == "__main__":
     data = generate_all()
 
@@ -220,8 +323,4 @@ if __name__ == "__main__":
             if items:
                 print(f"    예시: {json.dumps(items[0], ensure_ascii=False, indent=2)[:200]}...")
     else:
-        print("\n⚠️  Supabase 삽입은 Phase 1 개발 시 구현됩니다.")
-        print("    현재는 --dry-run으로 데이터 생성만 확인해주세요.")
-        print(f"\n📊 총 생성 데이터:")
-        for key, items in data.items():
-            print(f"  {key}: {len(items)}건")
+        insert_to_supabase(data)
