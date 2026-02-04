@@ -1,16 +1,23 @@
 """
 DAS 시스템 설정
-- 환경변수 로드
+- 환경변수 로드 (Streamlit Cloud 및 로컬 환경 모두 지원)
 - 공통 상수 정의
 """
 import os
 from dotenv import load_dotenv
 
+# 로컬 환경에서는 .env 파일 로드
 load_dotenv()
 
-# ── Supabase ──
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+# Streamlit Cloud 환경 지원: st.secrets 우선 사용
+try:
+    import streamlit as st
+    SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", ""))
+    SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY", ""))
+except (ImportError, FileNotFoundError):
+    # Streamlit이 없거나 secrets가 없으면 환경 변수 사용
+    SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
 # ── App ──
 APP_ENV = os.getenv("APP_ENV", "development")
