@@ -6,6 +6,7 @@ DAS - 당직 업무 자동화 시스템
 """
 import streamlit as st
 from datetime import datetime
+import calendar
 from config import APP_TITLE, APP_VERSION
 from services import db
 
@@ -40,17 +41,21 @@ def get_dashboard_stats():
         # 현재 연월
         now = datetime.now()
         current_month = f"{now.year}-{now.month:02d}"
+        # 해당 월의 마지막 날 계산
+        last_day = calendar.monthrange(now.year, now.month)[1]
+        month_start = f"{current_month}-01"
+        month_end = f"{current_month}-{last_day:02d}"
 
         # 통계 조회
         total_employees = db.count("employees", "is_active", True)
         total_assignments_this_month = len(db.select_between(
             "duty_assignments", "duty_date",
-            f"{current_month}-01", f"{current_month}-31"
+            month_start, month_end
         ))
         # 변경 건수는 change_date 범위 조회
         changes_this_month = db.select_between(
             "duty_changes", "change_date",
-            f"{current_month}-01", f"{current_month}-31"
+            month_start, month_end
         )
         total_changes_this_month = len(changes_this_month)
         pending_logs = db.count("duty_logs", "approval_status", "승인요청")
