@@ -12,10 +12,11 @@ load_dotenv()
 # Streamlit Cloud 환경 지원: st.secrets 우선 사용
 try:
     import streamlit as st
-    SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", ""))
-    SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY", ""))
-except (ImportError, FileNotFoundError):
-    # Streamlit이 없거나 secrets가 없으면 환경 변수 사용
+    # Streamlit Cloud에서 secrets 사용
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+except (ImportError, KeyError, FileNotFoundError, AttributeError):
+    # Streamlit이 없거나 secrets가 없으면 환경 변수 사용 (로컬 환경)
     SUPABASE_URL = os.getenv("SUPABASE_URL", "")
     SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
